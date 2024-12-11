@@ -1,0 +1,95 @@
+# Definition of global variables
+variables:
+  UE5_PATH:         "Your UE5 version instalataion path"                # Path to Unreal Engine 5 installation
+  BUILD_PATH:       "$CI_PROJECT_DIR/builds"                            # path to project builds
+  PROJECT_FILE:     "$CI_PROJECT_DIR/YourProjectName.uproject"          # Path to Unreal Engine 5 project file
+  BUILD_PLATFORM:   "Your platform"                                     # Platform
+  CONFIGURATION:    "Development"                                       # Configuration
+  TEST_BASE_CLASS:  "Blueprints"                                        # Base class of the tests that will be run
+
+# Definition of stages
+stages:
+  - build # Stage for building the Unreal Engine 5 project
+  - test  # Stage for testing the Unreal Engine 5 project
+
+# Cache dependencies to speed up builds
+cache:
+  key: "$CI_COMMIT_REF_SLUG" # Specifies cachekey for the cache
+  paths:
+    - .gitlab-ci/caches/ # Specifies path to store cached data
+
+# Build job for Unreal Engine on macOS
+build:
+  stage: build # Specifies stage
+  tags:
+    - $BUILD_PLATFORM # Specifies tag for runners
+  script:
+    # Prints given statement to console
+    - echo "Starting the build on macOS..."
+    # Makes new directory if needed including parent directories
+    #   -p Ensures parent directories are also created
+    - mkdir -p "$BUILD_PATH"
+    # Goes into the directory containing the "RunUAT.sh file"
+    - cd "$UE5_PATH/Engine/Build/BatchFiles"
+    # Cleans potential leftover cache data
+    - rm -rf "$UE5_PATH/Engine/DerivedDataCache"
+    # Builds the Unreal Engine 5 project 
+    #   BuildCookRun      prepares game assets, builds project and runs the project
+    #   -project          Path to project file
+    #   -noP4             Prevents Preforce version control interactions
+    #   -platform         Defines target build platform
+    #   -clientconfig     Defines the client configuration for the build
+    #   -serverconfig     Defines the server configuration for the build
+    #   -cook             Indicates cooking process needs to be performed
+    #   -build            Indicates building process needs to be performed
+    #   -stage            Prepared game files for packaging
+    #   -pak              Indicates output needs to be packaged in compressed file format(.pak)
+    #   -archive          Indicates output needs to be archived
+    #   -archivedirectory Indicates where the packaged build needs to be stored
+    - ./RunUAT.sh BuildCookRun -project="$PROJECT_FILE" -noP4 -platform=$BUILD_PLATFORM -clientconfig=$CONFIGURATION -serverconfig=$CONFIGURATION -cook -build -stage -pak -archive -archivedirectory="$BUILD_PATH"
+  after_script:
+    # Removes all unstaged changes in the directory
+    #   -fdx Forces files to be deleted even if they are in the .gitignore
+    - git clean -fdx 
+
+# Test Stage
+test:
+  stage: test # Specifies stage
+  tags:
+    - $BUILD_PLATFORM # Specifies tag for runners
+  script:
+    # Prints given statement to console
+    - echo "Running tests on macOS..."
+    # Goes into the directory containing the "UnrealEditor" file
+    - cd "$UE5_PATH/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS"
+    # Runs designated test of the Unreal Engine 5 project
+    #   ./UnrealEditor "$PROJECT_FILE"  Launches Unreal Editor with given project
+    #   -ExecCmds                       Executes Unreal Editor commands
+    #       Automation RunTests {Test base class}   Runs automated tests for given base class
+    #   -unattended                     Makes sure the Unreal Editor starts in "unattended" mode meaning no user interactions are required
+    #   -nopause                        Makes sure the Unreal Editor doesn't pause after each test
+    #   -testexit                       Makes sure the Unreal Editor is closed once all tests have been run
+    #   -ReportExportPath               Specifies the directory where the test report is stored
+    - ./UnrealEditor "$PROJECT_FILE" -ExecCmds="Automation RunTests $TEST_BASE_CLASS" -unattended -nopause -testexit="Automation Test Queue Empty" -ReportExportPath="$CI_PROJECT_DIR"
+    # Goes back to the root directory of the repository
+    - cd "$CI_PROJECT_DIR"
+    # Prints given statement to console
+    - echo "Converting Unreal engine 5 test report to Junit test report"
+    # Runs a Python script designed to convert a Unreal Engine 5 test report to a Junit test report
+    - python3 TestConverters/json_to_xml.py
+  artifacts:
+    when: always # Specifies artifacts will always need to be created
+    reports:
+      junit: "junit-report.xml" # Specifies a file needs to be stored in the junit storage
+    expire_in: 7 days # Specifies when artifacts need to be deleted
+  after_script:
+    # Prints given statement to console
+    - echo "Cleaning up, excluding junit-report.xml..."
+    # Stages the file
+    - git add junit-report.xml
+    # Removes all unstaged changes in the directory
+    #   -fdx Forces files to be deleted even if they are in the .gitignore
+    - git clean -fdx 
+    # Unstages the file
+    #   --cached Unstages file but doesn't delete the file
+    - git rm --cached junit-report.xml

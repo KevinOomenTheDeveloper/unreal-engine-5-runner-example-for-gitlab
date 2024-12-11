@@ -1,0 +1,1 @@
+This directory contains helper functions for using git
